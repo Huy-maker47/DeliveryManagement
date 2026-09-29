@@ -22,9 +22,13 @@ namespace DeliveryManagement.Controllers
             _userManager = userManager;
         }
 
-        // =========================
-        // HIỂN THỊ FORM TẠO ĐƠN
-        // =========================
+        private async Task LoadPackageTypesAsync()
+        {
+            ViewBag.PackageTypes = await _context.PackageTypes
+                .Where(p => p.IsActive)
+                .OrderBy(p => p.TypeName)
+                .ToListAsync();
+        }
 
         [HttpGet]
         public async Task<IActionResult> Create()
@@ -40,26 +44,18 @@ namespace DeliveryManagement.Controllers
             {
                 SenderName = user.FullName,
                 SenderPhone = user.PhoneNumber ?? string.Empty,
-                SenderAddress = user.DefaultSenderAddress ?? string.Empty
+                SenderAddress = user.DefaultSenderAddress ?? string.Empty,
+                Items = new List<OrderItemInputModel> { new OrderItemInputModel() }
             };
 
-            ViewBag.PackageTypes = await _context.PackageTypes
-                .Where(p => p.IsActive)
-                .OrderBy(p => p.TypeName)
-                .ToListAsync();
+            await LoadPackageTypesAsync();
 
             return View(model);
         }
 
-
-        // =========================
-        // XỬ LÝ TẠO ĐƠN
-        // =========================
-
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create(
-            CreateOrderViewModel model)
+        public async Task<IActionResult> Create(CreateOrderViewModel model)
         {
             var user = await _userManager.GetUserAsync(User);
 
@@ -70,56 +66,48 @@ namespace DeliveryManagement.Controllers
 
             if (!ModelState.IsValid)
             {
-                ViewBag.PackageTypes = await _context.PackageTypes
-                    .Where(p => p.IsActive)
-                    .OrderBy(p => p.TypeName)
-                    .ToListAsync();
-
+                await LoadPackageTypesAsync();
                 return View(model);
             }
+            var typeIds = model.Items
+                .Select(i => i.PackageTypeId)
+                .Distinct()
+                .ToList();
 
-            var packageTypeExists = await _context.PackageTypes
-                .AnyAsync(p =>
-                    p.PackageTypeId == model.PackageTypeId &&
-                    p.IsActive);
+            var validCount = await _context.PackageTypes
+                .CountAsync(p => typeIds.Contains(p.PackageTypeId) && p.IsActive);
 
-            if (!packageTypeExists)
+            if (validCount != typeIds.Count)
             {
                 ModelState.AddModelError(
-                    nameof(model.PackageTypeId),
-                    "Loại đóng gói không hợp lệ.");
+                    nameof(model.Items),
+                    "Có loại đóng gói không hợp lệ.");
 
-                ViewBag.PackageTypes = await _context.PackageTypes
-                    .Where(p => p.IsActive)
-                    .OrderBy(p => p.TypeName)
-                    .ToListAsync();
-
+                await LoadPackageTypesAsync();
                 return View(model);
             }
-
-            // =========================
-            // TẠO MÃ ĐƠN
-            // =========================
-
             string orderCode;
 
             do
             {
-                orderCode =
-                    $"DH{DateTime.Now:yyyyMMddHHmmssfff}";
+                orderCode = $"DH{DateTime.Now:yyyyMMddHHmmssfff}";
             }
             while (await _context.DeliveryOrders
                 .AnyAsync(o => o.OrderCode == orderCode));
+            var totalWeight = model.Items.Sum(i => i.Weight * i.Quantity);
 
-
-            // =========================
-            // TẠO DELIVERY ORDER
-            // =========================
+            var price = await _context.PriceTables
+                .Where(p =>
+                    p.DeliveryMethod == model.DeliveryMethod &&
+                    p.MinWeight < totalWeight &&
+                    totalWeight <= p.MaxWeight)
+                .OrderBy(p => p.MinWeight)
+                .Select(p => (decimal?)p.Price)
+                .FirstOrDefaultAsync();
 
             var order = new DeliveryOrder
             {
                 OrderCode = orderCode,
-
                 CustomerId = user.Id,
 
                 SenderName = model.SenderName,
@@ -135,67 +123,37 @@ namespace DeliveryManagement.Controllers
                 PaymentMethod = model.PaymentMethod,
                 PaymentStatus = "Chưa thanh toán",
 
-                TotalAmount = 0,
+                TotalAmount = price ?? 0,
 
                 CurrentStatus = "Chưa nhận",
-
                 CreatedAt = DateTime.Now
             };
-
-
-            // =========================
-            // TẠO ORDER ITEM
-            // =========================
-
-            var orderItem = new OrderItem
+            var orderItems = model.Items.Select(i => new OrderItem
             {
                 OrderCode = orderCode,
-
-                PackageTypeId = model.PackageTypeId,
-
-                Description = model.Description,
-                Size = model.Size,
-
-                Quantity = model.Quantity,
-
-                Weight = model.Weight,
-
-                IsFragile = model.IsFragile,
-                IsValuable = model.IsValuable
-            };
-
-
-            // =========================
-            // LƯU LỊCH SỬ TRẠNG THÁI
-            // =========================
-
+                PackageTypeId = i.PackageTypeId,
+                Description = i.Description,
+                Size = i.Size,
+                Quantity = i.Quantity,
+                Weight = i.Weight,
+                IsFragile = i.IsFragile,
+                IsValuable = i.IsValuable
+            }).ToList();
             var statusHistory = new OrderStatusHistory
             {
                 OrderCode = orderCode,
-
                 Status = "Chưa nhận",
-
                 ChangedBy = user.Id,
-
                 ChangedAt = DateTime.Now
             };
 
-
-            // =========================
-            // LƯU DATABASE
-            // =========================
-
             _context.DeliveryOrders.Add(order);
-            _context.OrderItems.Add(orderItem);
+            _context.OrderItems.AddRange(orderItems);
             _context.OrderStatusHistories.Add(statusHistory);
 
             await _context.SaveChangesAsync();
 
-
-            // =========================
-            // CẬP NHẬT THÔNG TIN NGƯỜI GỬI
-            // =========================
-
+            // Cập nhật thông tin người gửi
             user.DefaultSenderAddress = model.SenderAddress;
 
             if (string.IsNullOrWhiteSpace(user.FullName))
@@ -210,15 +168,12 @@ namespace DeliveryManagement.Controllers
 
             await _userManager.UpdateAsync(user);
 
+            TempData["SuccessMessage"] = price == null
+                ? $"Tạo yêu cầu giao hàng thành công. Mã đơn: {orderCode}. Chưa có mức giá phù hợp trong bảng giá nên tổng tiền chờ xác định."
+                : $"Tạo yêu cầu giao hàng thành công. Mã đơn: {orderCode}";
 
-            TempData["SuccessMessage"] =
-                $"Tạo yêu cầu giao hàng thành công. Mã đơn: {orderCode}";
-
-            return RedirectToAction(  "Details",  new { id = orderCode });
+            return RedirectToAction("Details", new { id = orderCode });
         }
-        // =========================
-        // XEM CHI TIẾT ĐƠN HÀNG
-        // =========================
 
         [HttpGet]
         public async Task<IActionResult> Details(string id)
@@ -227,26 +182,15 @@ namespace DeliveryManagement.Controllers
             if (user == null) return Challenge();
             if (string.IsNullOrWhiteSpace(id)) return NotFound();
 
-            // 1. Lấy thông tin đơn hàng gốc
             var order = await _context.DeliveryOrders
+                .Include(o => o.OrderItems)
+                    .ThenInclude(i => i.PackageType)
                 .FirstOrDefaultAsync(o => o.OrderCode == id);
 
             if (order == null) return NotFound();
 
-            // 2. Lấy chi tiết Hàng hóa & Phân loại hàng hóa (Phần của bạn)
-            var orderItem = await _context.OrderItems
-                .Include(oi => oi.PackageType) // Gọi bảng PackageType để lấy tên
-                .FirstOrDefaultAsync(oi => oi.OrderCode == id);
-
-            // Truyền qua ViewBag
-            ViewBag.OrderItem = orderItem;
-
             return View(order);
         }
-
-        // =========================
-        // HỦY YÊU CẦU GIAO HÀNG
-        // =========================
 
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -279,8 +223,6 @@ namespace DeliveryManagement.Controllers
 
                 return RedirectToAction("Index", "Home");
             }
-
-            // Chỉ cho phép hủy khi đơn chưa được tiếp nhận
             if (order.CurrentStatus != "Chưa nhận")
             {
                 TempData["ErrorMessage"] =
@@ -288,11 +230,7 @@ namespace DeliveryManagement.Controllers
 
                 return RedirectToAction("Index", "Home");
             }
-
-            // Cập nhật trạng thái đơn
             order.CurrentStatus = "Đã hủy";
-
-            // Ghi lịch sử trạng thái
             var statusHistory = new OrderStatusHistory
             {
                 OrderCode = order.OrderCode,
@@ -308,20 +246,14 @@ namespace DeliveryManagement.Controllers
             TempData["SuccessMessage"] =
                 $"Đã hủy yêu cầu giao hàng {order.OrderCode}.";
 
-            return RedirectToAction("Details",new { id = order.OrderCode });
+            return RedirectToAction("Details", new { id = order.OrderCode });
         }
-
-        // =========================
-        // CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG
-        // =========================
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateStatus(string id, string newStatus)
         {
             var user = await _userManager.GetUserAsync(User);
             if (user == null) return Challenge();
-
-            // Tìm đơn hàng theo mã (OrderCode)
             var order = await _context.DeliveryOrders.FirstOrDefaultAsync(o => o.OrderCode == id);
 
             if (order == null)

@@ -1,0 +1,65 @@
+﻿@model List<DeliveryManagement.Models.PriceTable>
+
+@{
+    ViewData["Title"] = "Quản lý bảng giá";
+}
+
+<div class="order-create-page">
+
+    <div class="order-create-header d-flex justify-content-between align-items-center">
+        <div>
+            <h1>Quản lý bảng giá</h1>
+            <p>Giá giao hàng theo hình thức giao và tổng khối lượng đơn hàng</p>
+        </div>
+        <a asp-action="Create" class="btn-submit-order d-inline-flex align-items-center text-decoration-none">
+            Thêm mức giá
+        </a>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success">@TempData["SuccessMessage"]</div>
+    }
+
+    <div class="order-section p-0 overflow-hidden">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Hình thức giao</th>
+                    <th>Khoảng khối lượng</th>
+                    <th>Ghi chú khoảng cách</th>
+                    <th class="text-end">Giá (VNĐ)</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in Model)
+                {
+                    <tr>
+                        <td>@p.DeliveryMethod</td>
+                        <td>@p.WeightRange</td>
+                        <td>@p.DistanceRange</td>
+                        <td class="text-end">@p.Price.ToString("N0", new System.Globalization.CultureInfo("vi-VN"))</td>
+                        <td class="text-end text-nowrap">
+                            <a asp-action="Edit" asp-route-id="@p.PriceTableId"
+                               class="btn btn-sm btn-outline-primary">Sửa</a>
+
+                            <form asp-action="Delete" asp-route-id="@p.PriceTableId" method="post" class="d-inline"
+                                  onsubmit="return confirm('Xóa mức giá này?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Xóa</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+
+                @if (!Model.Any())
+                {
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-4">Chưa có mức giá nào.</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+</div>

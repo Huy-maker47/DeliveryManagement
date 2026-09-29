@@ -2,7 +2,6 @@
 
 @{
     ViewData["Title"] = "Chi tiết đơn hàng";
-    var orderItem = ViewBag.OrderItem as DeliveryManagement.Models.OrderItem;
 }
 
 <div class="container mt-4">
@@ -29,7 +28,6 @@
     }
 
     <div class="row">
-        <!-- CỘT TRÁI: THÔNG TIN VẬN CHUYỂN -->
         <div class="col-md-6 mb-3">
             <div class="card h-100 shadow-sm border-0">
                 <div class="card-header bg-white fw-bold border-bottom-0 pt-3">1. Thông tin vận chuyển</div>
@@ -46,26 +44,36 @@
                 </div>
             </div>
         </div>
-
-        <!-- CỘT PHẢI: NHIỆM VỤ CỦA BẠN (HÀNG HÓA & TRẠNG THÁI) -->
         <div class="col-md-6 mb-3">
-
-            <!-- CHỨC NĂNG 1 & 2: CHI TIẾT & PHÂN LOẠI HÀNG HÓA -->
             <div class="card shadow-sm mb-4 border-0">
                 <div class="card-header bg-white fw-bold border-bottom-0 pt-3">2. Thông tin hàng hóa</div>
                 <div class="card-body bg-light rounded m-3 mt-0">
-                    @if (orderItem != null)
+                    @if (Model.OrderItems.Any())
                     {
-                        <p class="mb-1"><strong>Loại đóng gói:</strong> @(orderItem.PackageType?.TypeName ?? "Chưa phân loại")</p>
-                        <p class="mb-1"><strong>Kích thước:</strong> @orderItem.Size</p>
-                        <p class="mb-1"><strong>Khối lượng:</strong> @orderItem.Weight kg</p>
-                        <p class="mb-1"><strong>Số lượng:</strong> @orderItem.Quantity</p>
-                        <p class="mb-2"><strong>Mô tả:</strong> @orderItem.Description</p>
+                        var index = 1;
+                        foreach (var item in Model.OrderItems)
+                        {
+                            <div class="@(index > 1 ? "border-top pt-3 mt-3" : "")">
+                                <h6 class="fw-bold text-secondary">Hàng hóa @index</h6>
+                                <p class="mb-1"><strong>Loại đóng gói:</strong> @(item.PackageType?.TypeName ?? "Chưa phân loại")</p>
+                                <p class="mb-1"><strong>Kích thước:</strong> @item.Size</p>
+                                <p class="mb-1"><strong>Khối lượng:</strong> @item.Weight kg</p>
+                                <p class="mb-1"><strong>Số lượng:</strong> @item.Quantity</p>
+                                <p class="mb-2"><strong>Mô tả:</strong> @item.Description</p>
 
-                        <div class="mt-2">
-                            <span class="badge @(orderItem.IsFragile ? "bg-danger" : "bg-secondary")">@(orderItem.IsFragile ? "Hàng dễ vỡ" : "Không dễ vỡ")</span>
-                            <span class="badge @(orderItem.IsValuable ? "bg-warning text-dark" : "bg-secondary") ms-1">@(orderItem.IsValuable ? "Hàng giá trị cao" : "Hàng thường")</span>
-                        </div>
+                                <div class="mt-2">
+                                    <span class="badge @(item.IsFragile ? "bg-danger" : "bg-secondary")">@(item.IsFragile ? "Hàng dễ vỡ" : "Không dễ vỡ")</span>
+                                    <span class="badge @(item.IsValuable ? "bg-warning text-dark" : "bg-secondary") ms-1">@(item.IsValuable ? "Hàng giá trị cao" : "Hàng thường")</span>
+                                </div>
+                            </div>
+                            index++;
+                        }
+
+                        <hr />
+                        <p class="mb-0">
+                            <strong>Tổng tiền:</strong>
+                            @(Model.TotalAmount > 0 ? Model.TotalAmount.ToString("N0", new System.Globalization.CultureInfo("vi-VN")) + " VNĐ" : "Chờ xác định")
+                        </p>
                     }
                     else
                     {
@@ -73,8 +81,6 @@
                     }
                 </div>
             </div>
-
-            <!-- CHỨC NĂNG 3: CẬP NHẬT TRẠNG THÁI -->
             <div class="card shadow-sm border-info">
                 <div class="card-header bg-info text-white fw-bold">3. Cập nhật trạng thái</div>
                 <div class="card-body">
